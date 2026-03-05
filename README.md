@@ -13,3 +13,6 @@ Use run_alpgagenome.py. Specify modality outputs (all tracks or subset). Output 
 
 # Filter for tissue or cell type and extract top variants per modality
 Run variant_prioritization.py. Change ontology terms, number of top variants as you please.
+
+# Visualize top variants
+Run visualizing_top_variants.py. Saves a PDF file per variant with all available tracks.
