@@ -6,12 +6,12 @@ Usage:
 
 import argparse
 import pandas as pd
+import os 
 
 parser = argparse.ArgumentParser(description='Filter brain ontologies and extract top N per modality')
 parser.add_argument('--input',      required=True,              help='Path to variant_scores.csv')
 parser.add_argument('--output_filtered', default='brain_scores.csv',      help='Brain-filtered scores CSV')
 parser.add_argument('--output_top', default='top10_per_modality.csv',     help='Top N per modality CSV')
-parser.add_argument('--top_n',      default=10, type=int,       help='Top N variants per modality (default: 10)')
 args = parser.parse_args()
 
 # ── Brain ontology terms ───────────────────────────────────────────────────────
@@ -99,21 +99,52 @@ if not modality_col:
 
 print(f"Score column    : '{score_col}'")
 print(f"Modality column : '{modality_col}'")
-print(f"Extracting top {args.top_n} variants per modality by absolute score...\n")
+
+# Filter to strong effects only: quantile score > 0.95 or < -0.95
+df_significant = df_brain[
+    (df_brain[score_col] > 0.95) | (df_brain[score_col] < -0.95)
+].copy()
+
+print(f"\nRows with |quantile_score| > 0.95 : {len(df_significant)}")
+print(f"Rows filtered out                 : {len(df_brain) - len(df_significant)}")
+
+if len(df_significant) == 0:
+    print("WARNING: No variants passed the quantile threshold. Try lowering to 0.90.")
+    exit(1)
 
 df_top = (
-    df_brain
+     df_significant
     .dropna(subset=[score_col])
     .assign(abs_score=lambda x: x[score_col].abs())   # capture both up and down effects
     .sort_values('abs_score', ascending=False)
-    .groupby(modality_col)
-    .head(args.top_n)
     .drop(columns='abs_score')
     .reset_index(drop=True)
 )
 
-print(f"Top {args.top_n} per modality — variant counts:")
+
+# Add effect direction label
+df_top['effect_direction'] = df_top[score_col].apply(
+    lambda x: 'activating (+)' if x > 0 else 'repressive (-)'
+)
+
+# Summary of direction of effects
+print(f"\nStrong predictors by modality:")
 print(df_top[modality_col].value_counts().to_string())
 
+print(f"\nEffect direction breakdown:")
+print(df_top.groupby([modality_col, 'effect_direction']).size().to_string())
+
+# ── Save separate CSV per modality ────────────────────────────────────────────
+modality_dir = os.path.join(os.path.dirname(args.output_top), 'by_modality')
+os.makedirs(modality_dir, exist_ok=True)
+
+for modality, group in df_top.groupby(modality_col):
+    # Clean modality name for use in filename (remove special chars)
+    safe_modality = str(modality).replace(' ', '_').replace('/', '_').replace(':', '_')
+    modality_path = os.path.join(modality_dir, f"strong_{safe_modality}.csv")
+    group.reset_index(drop=True).to_csv(modality_path, index=False)
+    print(f"  {modality:<30} → {len(group):>4} variants → {modality_path}")
+
+print(f"\nAll modality CSVs saved to: {modality_dir}/")
 df_top.to_csv(args.output_top, index=False)
-print(f"\nTop {args.top_n} per modality saved to: {args.output_top}")
+print(f"\nDone!")
